@@ -54,6 +54,7 @@ export class ProductsAppStack extends cdk.Stack {
         },
         layers: [productsLayer],
         tracing: lambda.Tracing.ACTIVE,
+        insightsVersion: lambda.LambdaInsightsVersion.VERSION_1_0_229_0,
       },
     )
 
@@ -78,6 +79,7 @@ export class ProductsAppStack extends cdk.Stack {
         },
         layers: [productsLayer],
         tracing: lambda.Tracing.ACTIVE,
+        insightsVersion: lambda.LambdaInsightsVersion.VERSION_1_0_229_0,
       },
     )
 
