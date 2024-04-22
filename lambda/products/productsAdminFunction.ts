@@ -4,13 +4,16 @@ import {
   Context,
 } from 'aws-lambda'
 import { Product, ProductRepository } from '/opt/nodejs/productsLayer'
-import { DynamoDB } from 'aws-sdk'
+import { DynamoDB, Lambda } from 'aws-sdk'
+import { ProductEvent, ProductEventType } from '/opt/nodejs/productEventsLayer'
 import * as AWSXRay from 'aws-xray-sdk'
 
 AWSXRay.captureAWS(require('aws-sdk'))
 
 const productsDdb = process.env.PRODUCTS_DDB!
+const productEventsFunctionName = process.env.PRODUCT_EVENTS_FUNCTION_NAME!
 const ddbClient = new DynamoDB.DocumentClient()
+const lambdaClient = new Lambda()
 const productRepository = new ProductRepository(ddbClient, productsDdb)
 
 export async function handler(
@@ -28,6 +31,13 @@ export async function handler(
     console.log('POST /products')
     const product: Product = JSON.parse(event.body!)
     const productCreated = await productRepository.create(product)
+    const response = await sendProductEvent(
+      productCreated,
+      ProductEventType.CREATED,
+      'any_email_created@mail.com',
+      lambdaRequestId,
+    )
+    console.log(response)
     return {
       statusCode: 201,
       body: JSON.stringify(productCreated),
@@ -43,6 +53,13 @@ export async function handler(
           productId,
           product,
         )
+        const response = await sendProductEvent(
+          productUpdated,
+          ProductEventType.UPDATED,
+          'any_email_updated@mail.com',
+          lambdaRequestId,
+        )
+        console.log(response)
         return {
           statusCode: 200,
           body: JSON.stringify(productUpdated),
@@ -57,6 +74,12 @@ export async function handler(
       console.log(`DELETE /products/${productId}`)
       try {
         const productDeleted = await productRepository.deleteProduct(productId)
+        const response = await sendProductEvent(
+          productDeleted,
+          ProductEventType.DELETED,
+          'any_email_deleted@mail.com',
+          lambdaRequestId,
+        )
         return {
           statusCode: 200,
           body: JSON.stringify(productDeleted),
@@ -77,4 +100,28 @@ export async function handler(
       message: 'Bad request',
     }),
   }
+}
+
+function sendProductEvent(
+  product: Product,
+  eventType: ProductEventType,
+  email: string,
+  lambdaRequestId: string,
+) {
+  const event: ProductEvent = {
+    email,
+    eventType,
+    productCode: product.code,
+    productId: product.id,
+    productPrice: product.price,
+    requestId: lambdaRequestId,
+  }
+
+  return lambdaClient
+    .invoke({
+      FunctionName: productEventsFunctionName,
+      Payload: JSON.stringify(event),
+      InvocationType: 'Event',
+    })
+    .promise()
 }
