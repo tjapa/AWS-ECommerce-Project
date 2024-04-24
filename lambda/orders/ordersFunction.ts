@@ -232,6 +232,12 @@ async function sendOrderEvent(
     .publish({
       TopicArn: orderEventsTopicArn,
       Message: JSON.stringify(envelope),
+      MessageAttributes: {
+        eventType: {
+          DataType: 'String',
+          StringValue: eventType,
+        },
+      },
     })
     .promise()
 }

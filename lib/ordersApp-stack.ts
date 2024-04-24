@@ -15,7 +15,6 @@ interface OrdersAppStackProps extends cdk.StackProps {
 
 export class OrdersAppStack extends cdk.Stack {
   readonly ordersHandler: lambdaNodeJS.NodejsFunction
-  readonly orderEventsHandler: lambdaNodeJS.NodejsFunction
 
   constructor(scope: Construct, id: string, props: OrdersAppStackProps) {
     super(scope, id, props)
@@ -119,7 +118,7 @@ export class OrdersAppStack extends cdk.Stack {
     ordersTopic.grantPublish(this.ordersHandler)
     props.productsDdb.grantReadData(this.ordersHandler)
 
-    this.orderEventsHandler = new lambdaNodeJS.NodejsFunction(
+    const orderEventsHandler = new lambdaNodeJS.NodejsFunction(
       this,
       'OrderEventsFunction',
       {
@@ -141,9 +140,7 @@ export class OrdersAppStack extends cdk.Stack {
         insightsVersion: lambda.LambdaInsightsVersion.VERSION_1_0_229_0,
       },
     )
-    ordersTopic.addSubscription(
-      new subs.LambdaSubscription(this.orderEventsHandler),
-    )
+    ordersTopic.addSubscription(new subs.LambdaSubscription(orderEventsHandler))
     const eventsDdbPolicy = new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['dynamodb:PutItem'],
@@ -154,6 +151,34 @@ export class OrdersAppStack extends cdk.Stack {
         },
       },
     })
-    this.orderEventsHandler.addToRolePolicy(eventsDdbPolicy)
+    orderEventsHandler.addToRolePolicy(eventsDdbPolicy)
+
+    const billingHandler = new lambdaNodeJS.NodejsFunction(
+      this,
+      'BillingFunction',
+      {
+        runtime: lambda.Runtime.NODEJS_20_X,
+        functionName: 'BillingFunction',
+        entry: 'lambda/orders/billingFunction.ts',
+        handler: 'handler',
+        memorySize: 512,
+        timeout: cdk.Duration.seconds(2),
+        bundling: {
+          minify: true,
+          sourceMap: false,
+        },
+        tracing: lambda.Tracing.ACTIVE,
+        insightsVersion: lambda.LambdaInsightsVersion.VERSION_1_0_229_0,
+      },
+    )
+    ordersTopic.addSubscription(
+      new subs.LambdaSubscription(billingHandler, {
+        filterPolicy: {
+          eventType: sns.SubscriptionFilter.stringFilter({
+            allowlist: ['ORDER_CREATED'],
+          }),
+        },
+      }),
+    )
   }
 }
