@@ -184,7 +184,7 @@ function buildOrder(orderRequest: OrderRequest, products: Product[]): Order {
 }
 
 function convertToOrderResponse(order: Order): OrderResponse {
-  const orderProducts: OrderProductResponse[] = order.products.map(
+  const orderProducts: OrderProductResponse[] | undefined = order.products?.map(
     (product) => ({
       code: product.code,
       price: product.price,
@@ -213,7 +213,8 @@ async function sendOrderEvent(
   eventType: OrderEventType,
   lambdaRequestId: string,
 ) {
-  const productCodes: string[] = order.products.map((product) => product.code)
+  const productCodes: string[] =
+    order.products?.map((product) => product.code) ?? []
   const orderEvent: OrderEvent = {
     email: order.pk,
     orderId: order.sk!,

@@ -41,5 +41,5 @@ export type OrderResponse = {
     type: ShippingType
     carrier: CarrierType
   }
-  products: OrderProductResponse[]
+  products?: OrderProductResponse[]
 }
