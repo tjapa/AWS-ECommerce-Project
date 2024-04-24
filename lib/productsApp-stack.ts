@@ -4,6 +4,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as lambdaNodeJS from 'aws-cdk-lib/aws-lambda-nodejs'
 import * as ssm from 'aws-cdk-lib/aws-ssm'
 import * as iam from 'aws-cdk-lib/aws-iam'
+import * as sqs from 'aws-cdk-lib/aws-sqs'
 import { Construct } from 'constructs'
 
 interface ProductAppStackProps extends cdk.StackProps {
@@ -50,6 +51,13 @@ export class ProductsAppStack extends cdk.Stack {
       productEventsLayerArn,
     )
 
+    const productEventsDlq = new sqs.Queue(this, 'ProductEventsDlq', {
+      queueName: 'product-events-dlq',
+      retentionPeriod: cdk.Duration.days(10),
+      enforceSSL: false,
+      encryption: sqs.QueueEncryption.UNENCRYPTED,
+    })
+
     const productEventsHandler = new lambdaNodeJS.NodejsFunction(
       this,
       'ProductEventsFunction',
@@ -70,6 +78,8 @@ export class ProductsAppStack extends cdk.Stack {
         layers: [productEventsLayer],
         tracing: lambda.Tracing.ACTIVE,
         insightsVersion: lambda.LambdaInsightsVersion.VERSION_1_0_229_0,
+        deadLetterQueueEnabled: true,
+        deadLetterQueue: productEventsDlq,
       },
     )
     const eventsDdbPolicy = new iam.PolicyStatement({
