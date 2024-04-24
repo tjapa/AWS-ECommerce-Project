@@ -1,11 +1,11 @@
-import { DynamoDB } from 'aws-sdk'
+import { DynamoDB, SNS } from 'aws-sdk'
 import * as AWSXRay from 'aws-xray-sdk'
 import {
   APIGatewayProxyEvent,
   APIGatewayProxyResult,
   Context,
 } from 'aws-lambda'
-import { Order, OrderProduct, OrderRepository } from '/opt/nodejs/ordersLayer'
+import { Order, OrderRepository } from '/opt/nodejs/ordersLayer'
 import { Product, ProductRepository } from '/opt/nodejs/productsLayer'
 import {
   CarrierType,
@@ -15,13 +15,22 @@ import {
   PaymentType,
   ShippingType,
 } from '/opt/nodejs/ordersApiLayer'
+import {
+  OrderEvent,
+  OrderEventType,
+  Envelope,
+} from '/opt/nodejs/orderEventsLayer'
+import { v4 as uuid } from 'uuid'
 
 AWSXRay.captureAWS(require('aws-sdk'))
 
 const productsDdb = process.env.PRODUCTS_DDB!
 const ordersDdb = process.env.ORDERS_DDB!
+const orderEventsTopicArn = process.env.ORDER_EVENTS_TOPIC_ARN!
 
 const ddbClient = new DynamoDB.DocumentClient()
+const snsClient = new SNS()
+
 const orderRepository = new OrderRepository(ddbClient, ordersDdb)
 const productRepository = new ProductRepository(ddbClient, productsDdb)
 
@@ -93,7 +102,19 @@ export async function handler(
       }
     }
     const order = buildOrder(orderRequest, products)
-    const orderCreated = await orderRepository.createOrder(order)
+    const orderCreatedPromise = orderRepository.createOrder(order)
+    const eventResultPromise = sendOrderEvent(
+      order,
+      OrderEventType.CREATED,
+      lambaRequestId,
+    )
+    const [orderCreated, eventResult] = await Promise.all([
+      orderCreatedPromise,
+      eventResultPromise,
+    ])
+    console.log(
+      `Order created event sent - OrderId: ${orderCreated.sk} - MessageId: ${eventResult.MessageId}`,
+    )
     const orderResponse = convertToOrderResponse(orderCreated)
     return {
       statusCode: 201,
@@ -105,6 +126,14 @@ export async function handler(
       const email = event.queryStringParameters!.email!
       const orderId = event.queryStringParameters!.orderId!
       const orderDeleted = await orderRepository.deleteOrder(email, orderId)
+      const eventResult = await sendOrderEvent(
+        orderDeleted,
+        OrderEventType.DELETED,
+        lambaRequestId,
+      )
+      console.log(
+        `Order deleted event sent - OrderId: ${orderDeleted.sk} - MessageId: ${eventResult.MessageId}`,
+      )
       const orderResponse = convertToOrderResponse(orderDeleted)
       return {
         statusCode: 200,
@@ -138,6 +167,8 @@ function buildOrder(orderRequest: OrderRequest, products: Product[]): Order {
 
   const order: Order = {
     pk: orderRequest.email,
+    sk: uuid(),
+    createdAt: Date.now(),
     billing: {
       payment: orderRequest.payment,
       totalPrice,
@@ -175,4 +206,32 @@ function convertToOrderResponse(order: Order): OrderResponse {
   }
 
   return orderResponse
+}
+
+async function sendOrderEvent(
+  order: Order,
+  eventType: OrderEventType,
+  lambdaRequestId: string,
+) {
+  const productCodes: string[] = order.products.map((product) => product.code)
+  const orderEvent: OrderEvent = {
+    email: order.pk,
+    orderId: order.sk!,
+    billing: order.billing,
+    shipping: order.shipping,
+    requestId: lambdaRequestId,
+    productCodes,
+  }
+
+  const envelope: Envelope = {
+    eventType,
+    data: JSON.stringify(orderEvent),
+  }
+
+  return snsClient
+    .publish({
+      TopicArn: orderEventsTopicArn,
+      Message: JSON.stringify(envelope),
+    })
+    .promise()
 }
