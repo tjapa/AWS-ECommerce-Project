@@ -32,4 +32,37 @@ export class OrderEventRepository {
       })
       .promise()
   }
+
+  async getOrderEventsByEmail(email: string): Promise<OrderEventDdb[]> {
+    const data = await this.ddbClient
+      .query({
+        TableName: this.eventsDdb,
+        IndexName: 'emailIndex',
+        KeyConditionExpression: 'email = :email AND begins_with(sk, :prefix)',
+        ExpressionAttributeValues: {
+          ':email': email,
+          ':prefix': 'ORDER_',
+        },
+      })
+      .promise()
+    return (data?.Items as OrderEventDdb[]) ?? []
+  }
+
+  async getOrderEventsByEmailAndEventType(
+    email: string,
+    eventType: string,
+  ): Promise<OrderEventDdb[]> {
+    const data = await this.ddbClient
+      .query({
+        TableName: this.eventsDdb,
+        IndexName: 'emailIndex',
+        KeyConditionExpression: 'email = :email AND begins_with(sk, :prefix)',
+        ExpressionAttributeValues: {
+          ':email': email,
+          ':prefix': eventType,
+        },
+      })
+      .promise()
+    return (data?.Items as OrderEventDdb[]) ?? []
+  }
 }
