@@ -72,6 +72,7 @@ const invoiceAppLayersStack = new InvoicesAppLayersStack(
 )
 
 const invoiceWSApiStack = new InvoiceWSApiStack(app, 'InvoiceApi', {
+  eventsDdb: eventsDdbStack.table,
   tags: {
     cost: 'InvoiceApp',
     team: 'TamaluCode',
@@ -79,6 +80,7 @@ const invoiceWSApiStack = new InvoiceWSApiStack(app, 'InvoiceApi', {
   env,
 })
 invoiceWSApiStack.addDependency(invoiceAppLayersStack)
+invoiceWSApiStack.addDependency(eventsDdbStack)
 
 const ecommerceApiStack = new EcommerceApiStack(app, 'ECommerceApi', {
   productsFetchHandler: productsAppStack.productsFetchHandler,

@@ -8,10 +8,16 @@ import * as s3 from 'aws-cdk-lib/aws-s3'
 import * as iam from 'aws-cdk-lib/aws-iam'
 import * as s3n from 'aws-cdk-lib/aws-s3-notifications'
 import * as ssm from 'aws-cdk-lib/aws-ssm'
+import * as sqs from 'aws-cdk-lib/aws-sqs'
+import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources'
 import { Construct } from 'constructs'
 
+interface InvoiceWSApiStackProps extends cdk.StackProps {
+  eventsDdb: dynamodb.Table
+}
+
 export class InvoiceWSApiStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props: InvoiceWSApiStackProps) {
     super(scope, id, props)
 
     const invoiceTransactionLayerArn =
@@ -62,6 +68,7 @@ export class InvoiceWSApiStack extends cdk.Stack {
       billingMode: dynamodb.BillingMode.PROVISIONED,
       readCapacity: 1,
       writeCapacity: 1,
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
     })
 
     const bucket = new s3.Bucket(this, 'InvoiceBucket', {
@@ -266,5 +273,55 @@ export class InvoiceWSApiStack extends cdk.Stack {
         cancelImportHandler,
       ),
     })
+
+    const invoiceEventsHandler = new lambdaNodeJS.NodejsFunction(
+      this,
+      'InvoiceEventsFunction',
+      {
+        runtime: lambda.Runtime.NODEJS_20_X,
+        functionName: 'InvoiceEventsFunction',
+        entry: 'lambda/invoices/invoiceEventsFunction.ts',
+        handler: 'handler',
+        memorySize: 512,
+        timeout: cdk.Duration.seconds(2),
+        bundling: {
+          minify: true,
+          sourceMap: false,
+        },
+        environment: {
+          EVENTS_DDB: props.eventsDdb.tableName,
+          INVOICE_WSAPI_ENDPOINT: wsApiEndpoint,
+        },
+        layers: [invoiceWSConnectionLayer],
+        tracing: lambda.Tracing.ACTIVE,
+        insightsVersion: lambda.LambdaInsightsVersion.VERSION_1_0_229_0,
+      },
+    )
+    webSocketApi.grantManageConnections(invoiceEventsHandler)
+    const eventsDdbWriteTransactionPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['dynamodb:PutItem'],
+      resources: [props.eventsDdb.tableArn],
+      conditions: {
+        ['ForAllValues:StringLike']: {
+          'dynamodb:LeadingKeys': ['#invoice_*'],
+        },
+      },
+    })
+    invoiceEventsHandler.addToRolePolicy(eventsDdbWriteTransactionPolicy)
+
+    const invoiceEventsDlq = new sqs.Queue(this, 'Invoice EventsDlq', {
+      queueName: 'invoice-events-dlq',
+    })
+
+    invoiceEventsHandler.addEventSource(
+      new lambdaEventSources.DynamoEventSource(invoicesDdb, {
+        startingPosition: lambda.StartingPosition.TRIM_HORIZON,
+        batchSize: 5,
+        bisectBatchOnError: true,
+        onFailure: new lambdaEventSources.SqsDlq(invoiceEventsDlq),
+        retryAttempts: 3,
+      }),
+    )
   }
 }
