@@ -2,7 +2,10 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "commonjs",
-    "lib": ["es2020", "dom"],
+    "lib": [
+      "es2020",
+      "dom"
+    ],
     "declaration": true,
     "strict": true,
     "noImplicitAny": true,
@@ -17,7 +20,9 @@
     "inlineSources": true,
     "experimentalDecorators": true,
     "strictPropertyInitialization": false,
-    "typeRoots": ["./node_modules/@types"],
+    "typeRoots": [
+      "./node_modules/@types"
+    ],
     "baseUrl": "./",
     "paths": {
       "/opt/nodejs/productsLayer": [
@@ -37,8 +42,20 @@
       ],
       "/opt/nodejs/orderEventRepositoryLayer": [
         "lambda/orders/layers/orderEventsRepositoryLayer/nodejs/orderEventRepository"
+      ],
+      "/opt/nodejs/invoiceTransactionLayer": [
+        "lambda/invoices/layers/invoiceTransactionLayer/nodejs/invoiceTransaction"
+      ],
+      "/opt/nodejs/invoiceRepositoryLayer": [
+        "lambda/invoices/layers/invoiceRepositoryLayer/nodejs/invoiceRepository"
+      ],
+      "/opt/nodejs/invoiceWSConnectionLayer": [
+        "lambda/invoices/layers/invoiceWSConnectionLayer/nodejs/invoiceWSConnection"
       ]
     }
   },
-  "exclude": ["node_modules", "cdk.out"]
+  "exclude": [
+    "node_modules",
+    "cdk.out"
+  ]
 }
