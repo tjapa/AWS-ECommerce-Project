@@ -1,5 +1,5 @@
 import { Context, S3Event, S3EventRecord } from 'aws-lambda'
-import { ApiGatewayManagementApi, DynamoDB, S3 } from 'aws-sdk'
+import { ApiGatewayManagementApi, DynamoDB, EventBridge, S3 } from 'aws-sdk'
 import * as AWSXRay from 'aws-xray-sdk'
 import {
   InvoiceTransactionRepository,
@@ -15,12 +15,14 @@ AWSXRay.captureAWS(require('aws-sdk'))
 
 const invoicesDdb = process.env.INVOICES_DDB!
 const invoiceWsApiEndpoint = process.env.INVOICE_WSAPI_ENDPOINT!.substring(6)
+const auditBusName = process.env.AUDIT_BUS_NAME!
 
 const s3Client = new S3()
 const ddbClient = new DynamoDB.DocumentClient()
 const apigwManagementApi = new ApiGatewayManagementApi({
   endpoint: invoiceWsApiEndpoint,
 })
+const eventBridgeClient = new EventBridge()
 const invoiceTransactionRepository = new InvoiceTransactionRepository(
   ddbClient,
   invoicesDdb,
@@ -114,6 +116,25 @@ async function processRecord(record: S3EventRecord): Promise<void> {
           invoiceTransaction.connectionId,
           InvoiceTransactionStatus.NON_VALID_INVOICE_NUMBER,
         ),
+        eventBridgeClient
+          .putEvents({
+            Entries: [
+              {
+                Source: 'app.invoice',
+                EventBusName: auditBusName,
+                DetailType: 'invoice',
+                Time: new Date(),
+                Detail: JSON.stringify({
+                  errorDetail: 'FAIL_NO_INVOICE_NUMBER',
+                  info: {
+                    invoiceKey: key,
+                    customerName: invoice.customerName,
+                  },
+                }),
+              },
+            ],
+          })
+          .promise(),
       ])
       await invoiceWSService.disconnectClient(invoiceTransaction.connectionId)
     }

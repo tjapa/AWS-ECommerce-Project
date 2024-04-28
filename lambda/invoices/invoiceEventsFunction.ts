@@ -4,7 +4,7 @@ import {
   DynamoDBRecord,
   DynamoDBStreamEvent,
 } from 'aws-lambda'
-import { ApiGatewayManagementApi, DynamoDB } from 'aws-sdk'
+import { ApiGatewayManagementApi, DynamoDB, EventBridge } from 'aws-sdk'
 import { InvoiceWSService } from '/opt/nodejs/invoiceWSConnectionLayer'
 import * as AWSXRay from 'aws-xray-sdk'
 
@@ -12,11 +12,13 @@ AWSXRay.captureAWS(require('aws-sdk'))
 
 const eventsDdb = process.env.EVENTS_DDB!
 const invoiceWsApiEndpoint = process.env.INVOICE_WSAPI_ENDPOINT!.substring(6)
+const auditBusName = process.env.AUDIT_BUS_NAME!
 
 const ddbClient = new DynamoDB.DocumentClient()
 const apigwManagementApi = new ApiGatewayManagementApi({
   endpoint: invoiceWsApiEndpoint,
 })
+const eventBridgeClient = new EventBridge()
 
 const invoiceWSService = new InvoiceWSService(apigwManagementApi)
 
@@ -93,6 +95,24 @@ async function processExpiredTransaction(invoiceImage: {
       connectionId,
       'TIMEOUT',
     )
-    await invoiceWSService.disconnectClient(connectionId)
+    await Promise.all([
+      invoiceWSService.disconnectClient(connectionId),
+      eventBridgeClient
+        .putEvents({
+          Entries: [
+            {
+              Source: 'app.invoice',
+              EventBusName: auditBusName,
+              DetailType: 'invoice',
+              Time: new Date(),
+              Detail: JSON.stringify({
+                errorDetail: 'TIMEOUT',
+                transactionId,
+              }),
+            },
+          ],
+        })
+        .promise(),
+    ])
   }
 }
