@@ -98,6 +98,7 @@ export async function handler(
       orderRequest.productIds,
     )
     if (products.length !== orderRequest.productIds.length) {
+      console.error('Some product was not found')
       const result = await eventBridgeClient
         .putEvents({
           Entries: [
