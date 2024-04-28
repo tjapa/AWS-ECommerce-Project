@@ -1,4 +1,9 @@
-import { DynamoDB, EventBridge, SNS } from 'aws-sdk'
+import {
+  CognitoIdentityServiceProvider,
+  DynamoDB,
+  EventBridge,
+  SNS,
+} from 'aws-sdk'
 import * as AWSXRay from 'aws-xray-sdk'
 import {
   APIGatewayProxyEvent,
@@ -21,6 +26,7 @@ import {
   Envelope,
 } from '/opt/nodejs/orderEventsLayer'
 import { v4 as uuid } from 'uuid'
+import { AuthInfoService } from '/opt/nodejs/authUserInfoLayer'
 
 AWSXRay.captureAWS(require('aws-sdk'))
 
@@ -35,6 +41,8 @@ const eventBridgeClient = new EventBridge()
 
 const orderRepository = new OrderRepository(ddbClient, ordersDdb)
 const productRepository = new ProductRepository(ddbClient, productsDdb)
+const cognitoIdentityServiceProvicer = new CognitoIdentityServiceProvider()
+const authInfoService = new AuthInfoService(cognitoIdentityServiceProvicer)
 
 export async function handler(
   event: APIGatewayProxyEvent,
@@ -55,11 +63,22 @@ export async function handler(
     }
   }
 
+  const isAdmin = !authInfoService.isAdminUser(event.requestContext.authorizer)
+  const authenticatedEmailUser = await authInfoService.getUserInfo(
+    event.requestContext.authorizer,
+  )
+
   if (method === 'GET') {
     console.log('GET /orders')
     if (event.queryStringParameters) {
       const email = event.queryStringParameters!.email
       const orderId = event.queryStringParameters!.orderId
+      if (!isAdmin && authenticatedEmailUser !== email) {
+        return {
+          statusCode: 403,
+          body: "You don't have permission to access this operation",
+        }
+      }
       if (email && orderId) {
         try {
           const order = await orderRepository.getOrder(email, orderId)
@@ -84,6 +103,12 @@ export async function handler(
         }
       }
     } else {
+      if (!authInfoService.isAdminUser(event.requestContext.authorizer)) {
+        return {
+          statusCode: 403,
+          body: "You don't have permission to access this operation",
+        }
+      }
       const orders = await orderRepository.getAllOrders()
       const orderResponses = orders.map(convertToOrderResponse)
       return {
@@ -93,7 +118,18 @@ export async function handler(
     }
   } else if (method === 'POST') {
     console.log('POST /orders')
+
     const orderRequest = JSON.parse(event.body!) as OrderRequest
+
+    if (!isAdmin) {
+      orderRequest.email = authenticatedEmailUser
+    } else if (!orderRequest.email) {
+      return {
+        statusCode: 403,
+        body: 'Missing the order owner email',
+      }
+    }
+
     const products = await productRepository.getProductsByIds(
       orderRequest.productIds,
     )
@@ -144,6 +180,14 @@ export async function handler(
     try {
       console.log('DELETE /orders')
       const email = event.queryStringParameters!.email!
+
+      if (!isAdmin && authenticatedEmailUser !== email) {
+        return {
+          statusCode: 403,
+          body: "You don't have permission to access this operation",
+        }
+      }
+
       const orderId = event.queryStringParameters!.orderId!
       const orderDeleted = await orderRepository.deleteOrder(email, orderId)
       const eventResult = await sendOrderEvent(

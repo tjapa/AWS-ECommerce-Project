@@ -4,9 +4,10 @@ import {
   Context,
 } from 'aws-lambda'
 import { Product, ProductRepository } from '/opt/nodejs/productsLayer'
-import { DynamoDB, Lambda } from 'aws-sdk'
+import { CognitoIdentityServiceProvider, DynamoDB, Lambda } from 'aws-sdk'
 import { ProductEvent, ProductEventType } from '/opt/nodejs/productEventsLayer'
 import * as AWSXRay from 'aws-xray-sdk'
+import { AuthInfoService } from '/opt/nodejs/authUserInfoLayer'
 
 AWSXRay.captureAWS(require('aws-sdk'))
 
@@ -15,6 +16,8 @@ const productEventsFunctionName = process.env.PRODUCT_EVENTS_FUNCTION_NAME!
 const ddbClient = new DynamoDB.DocumentClient()
 const lambdaClient = new Lambda()
 const productRepository = new ProductRepository(ddbClient, productsDdb)
+const cognitoIdentityServiceProvicer = new CognitoIdentityServiceProvider()
+const authInfoService = new AuthInfoService(cognitoIdentityServiceProvicer)
 
 export async function handler(
   event: APIGatewayProxyEvent,
@@ -27,6 +30,10 @@ export async function handler(
     `API Gateway RequestId: ${apiRequestId} - Lambda RequestId: ${lambdaRequestId}`,
   )
 
+  const userEmail = await authInfoService.getUserInfo(
+    event.requestContext.authorizer,
+  )
+
   if (event.resource === '/products') {
     console.log('POST /products')
     const product: Product = JSON.parse(event.body!)
@@ -34,7 +41,7 @@ export async function handler(
     const response = await sendProductEvent(
       productCreated,
       ProductEventType.CREATED,
-      'any_email_created@mail.com',
+      userEmail,
       lambdaRequestId,
     )
     console.log(response)
@@ -56,7 +63,7 @@ export async function handler(
         const response = await sendProductEvent(
           productUpdated,
           ProductEventType.UPDATED,
-          'any_email_updated@mail.com',
+          userEmail,
           lambdaRequestId,
         )
         console.log(response)
@@ -77,7 +84,7 @@ export async function handler(
         const response = await sendProductEvent(
           productDeleted,
           ProductEventType.DELETED,
-          'any_email_deleted@mail.com',
+          userEmail,
           lambdaRequestId,
         )
         return {
